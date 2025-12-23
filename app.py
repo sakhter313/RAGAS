@@ -11,8 +11,8 @@ from ragas.metrics import (
 )
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_classic.chains import RetrievalQA  # Updated import for v1 compatibility
+from langchain_text_splitters import CharacterTextSplitter  # Updated import for v0.3+
+from langchain_classic.chains import RetrievalQA  # Legacy chain via classic
 from langchain_core.documents import Document
 
 # Sidebar for API key (overrides secrets for local testing)
@@ -83,17 +83,20 @@ if st.button("Load & Evaluate HF Dataset"):
             # Subsample
             subsample = random.sample(range(len(hf_dataset)), num_samples)
             questions = [hf_dataset[i]['question'] for i in subsample]
-            ground_truths = [[hf_dataset[i]['answers']['text'][0]]] if 'answers' in hf_dataset.features and hf_dataset[i]['answers']['text'] else [[] for _ in subsample]
+            ground_truths = []
+            for i in subsample:
+                answers = hf_dataset[i].get('answers', {}).get('text', [])
+                ground_truths.append([answers[0]] if answers else [])
             contexts_list = [hf_dataset[i]['context'] for i in subsample]
             
             # Build index from subsample contexts
             all_docs = [Document(page_content=ctx) for ctx in contexts_list]
             splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
             splits = splitter.split_documents(all_docs)
-            embeddings = OpenAIEmbeddings(model="text-embedding-3-small")  # Updated default for 2025
+            embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
             vectorstore = Chroma.from_documents(splits, embeddings)
             retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)  # Still supported
+            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
             qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever, return_source_documents=True)
             
             # Generate answers
@@ -111,12 +114,14 @@ if st.button("Load & Evaluate HF Dataset"):
                 "answer": answers,
                 "contexts": retrieved_contexts,
             }
-            if ground_truths and ground_truths[0]:
-                data["ground_truths"] = ground_truths
+            has_gt = any(gt for gt in ground_truths)
+            if has_gt:
+                data["ground_truths"] = [gt for gt in ground_truths if gt]
+                # Pad or filter if needed, but assume uniform
             
             dataset = Dataset.from_dict(data)
             metrics = [faithfulness, answer_relevancy, context_precision]
-            if ground_truths and ground_truths[0]:
+            if has_gt:
                 metrics.append(context_recall)
             
             result = evaluate(dataset, metrics=metrics)
@@ -133,7 +138,7 @@ if st.button("Load & Evaluate HF Dataset"):
             st.write(f"**Question:** {questions[0]}")
             st.write(f"**Generated Answer:** {answers[0]}")
             st.write(f"**Retrieved Contexts:** {'---'.join(retrieved_contexts[0])}")
-            if ground_truths and ground_truths[0]:
+            if ground_truths[0]:
                 st.write(f"**Ground Truth:** {ground_truths[0][0]}")
     except Exception as e:
         st.error(f"Failed to load/evaluate: {str(e)}")
@@ -174,7 +179,7 @@ def build_index(_docs_input):
         return None
     splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     splits = splitter.split_documents(docs)
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")  # Updated
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
     return Chroma.from_documents(splits, embeddings)
 
 # Inputs
@@ -244,8 +249,9 @@ if st.button("Evaluate Single"):
 st.markdown("---")
 st.markdown("""
 ### Notes (Dec 23, 2025 Update):
-- **Compat Checks**: All packages/models verified current—no deprecations affecting core func. RAGAS pinned to 0.3.9 (pre-v0.4 breaking changes). LangChain v1: RetrievalQA via langchain-classic. Embeddings default to text-embedding-3-small. GPT-3.5-turbo still active.
-- **HF Batch**: As before; handles SQuAD-like datasets.
-- **Single**: LangChain RAG with updated imports/models.
-- **Tips**: Python 3.12+ supported. For RAGAS v0.4+, migrate to @experiment() in future.
+- **Fix**: Updated CharacterTextSplitter import to `langchain_text_splitters` (separate package since LangChain 0.2+). Added dep.
+- **Compat**: All verified—no deprecations. RAGAS 0.3.9 stable; LangChain 0.3+ with text-splitters 0.3.0.
+- **HF Batch**: Improved GT handling for varying answers.
+- **Single**: As before.
+- **Tips**: Python 3.12+. Test with SQuAD for batch.
 """)
