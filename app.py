@@ -13,86 +13,39 @@ from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_classic.chains import RetrievalQA
 from langchain_core.documents import Document
+from langchain_groq import ChatGroq
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-# ==================== CONFIG & PROVIDER SETUP ====================
+# ==================== SINGLE PLATFORM: GROQ + GEMINI EMBEDDINGS ====================
 
-PROVIDERS = {
-    "Groq (Ultra-fast inference – Free tier available)": {
-        "llm_class": "ChatGroq",
-        "embedding_class": "GoogleGenerativeAIEmbeddings",
-        "llm_model": "llama-3.3-70b-versatile",
-        "embedding_model": "models/embedding-001",
-        "needs_keys": ["GROQ_API_KEY", "GOOGLE_API_KEY"],
-        "description": "Generation/Judge: Llama-3.3-70B (Groq). Embeddings: Gemini (free)."
-    },
-    "Google Gemini (Free tier)": {
-        "llm_class": "ChatGoogleGenerativeAI",
-        "embedding_class": "GoogleGenerativeAIEmbeddings",
-        "llm_model": "gemini-1.5-flash",
-        "embedding_model": "models/embedding-001",
-        "needs_keys": ["GOOGLE_API_KEY"],
-        "description": "Fully Gemini – free & reliable."
-    },
-    "OpenAI": {
-        "llm_class": "ChatOpenAI",
-        "embedding_class": "OpenAIEmbeddings",
-        "llm_model": "gpt-3.5-turbo",
-        "embedding_model": "text-embedding-3-small",
-        "needs_keys": ["OPENAI_API_KEY"],
-        "description": "GPT-3.5-turbo + OpenAI embeddings."
-    }
-}
+st.sidebar.header("API Keys (Groq + Gemini Embeddings)")
 
-# Sidebar Provider Selection
-st.sidebar.header("Provider Selection")
-selected_provider_name = st.sidebar.selectbox(
-    "Choose Provider:",
-    options=list(PROVIDERS.keys()),
-    index=0
-)
+groq_api_key = st.sidebar.text_input("Groq API Key:", type="password", help="Get free key at https://console.groq.com/keys")
+gemini_api_key = st.sidebar.text_input("Google Gemini API Key (for embeddings):", type="password", help="Get free key at https://aistudio.google.com/app/apikey")
 
-provider_config = PROVIDERS[selected_provider_name]
+if groq_api_key:
+    os.environ["GROQ_API_KEY"] = groq_api_key
+if gemini_api_key:
+    os.environ["GOOGLE_API_KEY"] = gemini_api_key
 
-# API Key Inputs
-api_keys = {}
-for env_var in provider_config["needs_keys"]:
-    label = env_var.replace("_API_KEY", "").title() + " API Key"
-    help_text = {
-        "GROQ_API_KEY": "Get at https://console.groq.com/keys",
-        "GOOGLE_API_KEY": "Get at https://aistudio.google.com/app/apikey",
-        "OPENAI_API_KEY": "Get at https://platform.openai.com/api-keys"
-    }.get(env_var, "")
-    api_keys[env_var] = st.sidebar.text_input(label, type="password", help=help_text)
-    if api_keys[env_var]:
-        os.environ[env_var] = api_keys[env_var]
-
-# Validate keys
-missing_keys = [k for k in provider_config["needs_keys"] if not api_keys.get(k)]
-if missing_keys:
-    st.error(f"Please provide the following API key(s): {', '.join([k.replace('_API_KEY', '') for k in missing_keys])}")
+# Validate both keys
+if not groq_api_key or not gemini_api_key:
+    st.error("Please provide both Groq API Key and Google Gemini API Key to continue.")
+    st.info("Groq powers ultra-fast generation & RAGAS judging (Llama 3.3 70B). Gemini provides free, high-quality embeddings.")
     st.stop()
 
-st.sidebar.success(f"{selected_provider_name} configured")
-st.sidebar.info(provider_config["description"])
+st.sidebar.success("Groq + Gemini configured – Blazing fast & free tier friendly!")
+st.sidebar.info("Generation & Judge: Llama-3.3-70B (Groq) | Embeddings: Gemini")
 
-# Dynamic Imports
-if "Groq" in selected_provider_name:
-    from langchain_groq import ChatGroq
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-elif "Gemini" in selected_provider_name:
-    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-else:
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+# Fixed configuration (single platform)
+llm_model = "llama-3.3-70b-versatile"
+embedding_model = "models/embedding-001"
 
-# Instantiate classes
-ChatLLMClass = globals()[provider_config["llm_class"]]
-EmbeddingsClass = globals()[provider_config["embedding_class"]]
+ragas_llm = ChatGroq(model=llm_model, temperature=0)
+embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
 
-llm_model = provider_config["llm_model"]
-embedding_model = provider_config["embedding_model"]
-
-ragas_llm = ChatLLMClass(model=llm_model, temperature=0)
-embeddings = EmbeddingsClass(model=embedding_model)
+st.title("RAGAS Evaluation App – Groq + Gemini (Single Platform)")
+st.markdown("Simplified, high-performance setup: **Groq** for lightning-fast LLM inference + **Gemini** for free embeddings.")
 
 # ==================== SAMPLE DATA ====================
 
@@ -146,7 +99,7 @@ def build_vectorstore(documents_text: str):
 
 def run_rag(question: str, vectorstore):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-    llm = ChatLLMClass(model=llm_model, temperature=0)
+    llm = ChatGroq(model=llm_model, temperature=0)
     qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever, return_source_documents=True)
     result = qa_chain({"query": question})
     return result["result"], [doc.page_content for doc in result["source_documents"]]
@@ -154,9 +107,9 @@ def run_rag(question: str, vectorstore):
 def evaluate_ragas(question, answer, contexts, ground_truth=None):
     contexts_list = [c.strip() for c in contexts.split("---") if c.strip()] if isinstance(contexts, str) else contexts
     data = {
-        "question": [question],
-        "answer": [answer],
-        "contexts": [contexts_list],
+        "question": [question] if isinstance(question, str) else question,
+        "answer": [answer] if isinstance(answer, str) else answer,
+        "contexts": [contexts_list] if isinstance(contexts_list[0], str) else contexts_list,
     }
     if ground_truth and ground_truth.strip():
         data["ground_truths"] = [[ground_truth.strip()]]
@@ -170,23 +123,20 @@ def evaluate_ragas(question, answer, contexts, ground_truth=None):
 
 # ==================== MAIN APP ====================
 
-st.title("RAGAS Evaluation App – Modular & Multi-Provider")
-st.markdown("Clean, modular code with Groq (default), Gemini, or OpenAI support.")
-
 # --- Batch Evaluation ---
 st.subheader("Batch Evaluation with Hugging Face Dataset")
+st.info("Groq is extremely fast – safely run 10–15 samples!")
 col1, col2, col3 = st.columns(3)
 with col1:
     dataset_name = st.text_input("Dataset Name:", value="squad")
 with col2:
     split = st.text_input("Split:", value="validation")
 with col3:
-    max_samples = 15 if "Groq" in selected_provider_name or "Gemini" in selected_provider_name else 5
-    num_samples = st.slider("Samples:", 1, max_samples, 5)
+    num_samples = st.slider("Number of Samples:", 1, 15, 8)
 
 if st.button("Load & Evaluate HF Dataset"):
     try:
-        with st.spinner("Running batch RAG + RAGAS evaluation..."):
+        with st.spinner("Running batch RAG + RAGAS evaluation (Groq speed!)..."):
             hf_dataset = load_dataset(dataset_name, split=split)
             indices = random.sample(range(len(hf_dataset)), num_samples)
             questions = [hf_dataset[i]["question"] for i in indices]
@@ -204,17 +154,21 @@ if st.button("Load & Evaluate HF Dataset"):
                 answers.append(ans)
                 retrieved_contexts.append(ctxs)
 
-            result = evaluate_ragas(
-                questions, answers, retrieved_contexts,
-                ground_truths[0][0] if ground_truths and ground_truths[0] else None
-            )  # Simplified – uses first GT as proxy; for full use list
+            result = evaluate_ragas(questions, answers, retrieved_contexts)
 
-        st.success("Batch complete!")
+        st.success("Batch evaluation complete!")
         st.subheader("Average Results")
         cols = st.columns(len(result))
         for i, (m, s) in enumerate(result.items()):
             with cols[i]:
                 st.metric(m.replace("_", " ").title(), f"{s:.4f}")
+
+        if st.checkbox("Show First Sample Details"):
+            st.write("**Question:**", questions[0])
+            st.write("**Generated Answer:**", answers[0])
+            st.write("**Retrieved Contexts:**", "---".join(retrieved_contexts[0]))
+            if ground_truths[0]:
+                st.write("**Ground Truth:**", ground_truths[0][0])
 
     except Exception as e:
         st.error(f"Error: {str(e)}")
@@ -222,7 +176,6 @@ if st.button("Load & Evaluate HF Dataset"):
 # --- Single Evaluation ---
 st.subheader("Single Evaluation")
 
-# Sample loader
 selected_sample = st.selectbox("Load Sample:", ["None"] + [s["name"] for s in samples])
 if selected_sample != "None":
     sample = next(s for s in samples if s["name"] == selected_sample)
@@ -233,7 +186,6 @@ if selected_sample != "None":
         st.session_state.vectorstore = None
         st.rerun()
 
-# Document input
 documents_input = st.text_area(
     "Documents (--- separated):",
     value=st.session_state.get("documents", ""),
@@ -242,17 +194,16 @@ documents_input = st.text_area(
 
 if st.button("Build Index"):
     if documents_input.strip():
-        with st.spinner("Building index..."):
+        with st.spinner("Building index with Gemini embeddings..."):
             st.session_state.vectorstore = build_vectorstore(documents_input)
         st.success("Index built!")
     else:
-        st.error("Add documents.")
+        st.error("Please add at least one document.")
 
-# Session state
-defaults = {"question": "", "answer": "", "contexts": "", "ground_truth": "", "documents": documents_input, "vectorstore": None}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+# Session state initialization
+for key in ["question", "answer", "contexts", "ground_truth", "documents", "vectorstore"]:
+    if key not in st.session_state:
+        st.session_state[key] = "" if key != "vectorstore" else None
 
 question = st.text_area("Question:", value=st.session_state.question, height=80)
 st.session_state.question = question
@@ -260,7 +211,7 @@ st.session_state.question = question
 col1, col2 = st.columns(2)
 with col1:
     if st.session_state.vectorstore and st.button("Generate Answer with RAG"):
-        with st.spinner("Generating..."):
+        with st.spinner("Generating with Groq (very fast!)..."):
             answer, contexts = run_rag(question, st.session_state.vectorstore)
             st.session_state.answer = answer
             st.session_state.contexts = "---".join(contexts)
@@ -270,24 +221,24 @@ with col2:
     manual = st.checkbox("Manual Mode", value=not bool(st.session_state.vectorstore))
     if manual:
         st.session_state.answer = st.text_area("Answer:", value=st.session_state.answer, height=80)
-        st.session_state.contexts = st.text_area("Contexts:", value=st.session_state.contexts, height=120)
+        st.session_state.contexts = st.text_area("Contexts (--- separated):", value=st.session_state.contexts, height=120)
 
 ground_truth = st.text_area("Ground Truth (optional):", value=st.session_state.ground_truth, height=80)
 st.session_state.ground_truth = ground_truth
 
 if st.button("Evaluate Single"):
     if not question or not st.session_state.answer or not st.session_state.contexts:
-        st.error("Fill required fields.")
+        st.error("Please fill Question, Answer, and Contexts.")
     else:
         try:
-            with st.spinner("Evaluating..."):
+            with st.spinner("Running RAGAS evaluation (Groq judging)..."):
                 result = evaluate_ragas(
                     question,
                     st.session_state.answer,
                     st.session_state.contexts,
                     ground_truth
                 )
-            st.success("Done!")
+            st.success("Evaluation complete!")
             st.subheader("Results")
             cols = st.columns(len(result))
             for i, (m, s) in enumerate(result.items()):
@@ -297,4 +248,4 @@ if st.button("Evaluate Single"):
             st.error(f"Error: {str(e)}")
 
 st.markdown("---")
-st.caption("Modular design: Config-driven providers, reusable helpers, clean separation.")
+st.caption("Single-platform optimized: Groq (LLM + Judge) + Gemini (Embeddings) → Maximum speed, minimal cost.")
