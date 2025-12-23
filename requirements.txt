@@ -1,8 +1,9 @@
 streamlit==1.28.0
-datasets==2.14.6
-transformers==4.35.0
-evaluate==0.4.1
 torch==2.1.0
+transformers==4.35.0
+accelerate==0.24.1  # Helps with model loading
+datasets==2.14.6
+evaluate==0.4.1
 plotly==5.17.0
 pandas==2.1.3
 numpy==1.24.3
