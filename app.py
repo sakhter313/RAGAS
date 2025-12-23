@@ -30,15 +30,16 @@ if st.button("Evaluate"):
             "answer": [generated_answer],
             "contexts": [contexts],
         }
-        if ground_truth:
-            data["ground_truths"] = [ground_truth]  # Note: ragas expects 'ground_truths' for list of truths
+        has_ground_truth = bool(ground_truth.strip())
+        if has_ground_truth:
+            data["ground_truths"] = [[ground_truth.strip()]]  # ragas expects List[List[str]]
         
         # Create dataset
         dataset = Dataset.from_dict(data)
         
         # Select metrics
         metrics = [faithfulness, answer_relevancy, context_precision]
-        if ground_truth:
+        if has_ground_truth:
             metrics.append(context_recall)
         
         try:
@@ -56,7 +57,7 @@ st.markdown("---")
 st.markdown("""
 ### Usage Notes:
 - **Contexts**: Provide one or more retrieved documents, separated by '---'. Each will be treated as a separate context chunk.
-- **Ground Truth**: Optional but recommended for full metrics (enables context_recall).
+- **Ground Truth**: Optional but recommended for full metrics (enables context_recall). Provide as a single string.
 - **API Key**: Add `OPENAI_API_KEY = "your_key_here"` to your Streamlit Cloud secrets.
 - **Customization**: Edit the code to add more metrics or batch evaluation via CSV upload.
 """)
