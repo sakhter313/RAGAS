@@ -1,16 +1,8 @@
-streamlit>=1.28.0,<1.53.0
-torch>=2.5.0,<2.6.0  # 3.13 support from 2.5+
-transformers>=4.35.0,<4.36.0
-accelerate>=0.24.0  # For CPU model loads
-datasets>=2.14.0,<3.0.0
-evaluate>=0.4.0,<0.5.0
-plotly>=5.17.0,<6.0.0
-pandas>=2.1.0,<3.0.0
-numpy>=1.24.0,<2.0.0
-sentence-transformers>=3.0.0  # Free embeddings fallback
-langchain>=0.1.0,<0.3.0  # If using RAG
-langchain-community>=0.0.20,<0.1.0
-langchain-chroma>=0.1.0,<0.2.0
-chromadb>=0.4.0,<0.5.0  # Vectorstore
-google-genai>=0.8.0  # Updated from deprecated
-ragas>=0.1.0,<0.2.0  # If eval lib
+streamlit==1.38.0
+pandas==2.2.3
+giskard[llm]==1.2.0  # Latest OSS with HF support
+huggingface_hub==0.25.0  # For InferenceClient
+datasets==3.0.1  # HF datasets loader
+transformers==4.46.0  # For local embeddings/models
+torch==2.5.0  # CPU-only for Cloud
+sentence-transformers==3.1.1  # Local embedding fallback
