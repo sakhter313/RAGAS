@@ -14,6 +14,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import CharacterTextSplitter  # Updated import for v0.3+
 from langchain_classic.chains import RetrievalQA  # Legacy chain via classic
 from langchain_core.documents import Document
+import openai  # For error handling
 
 # Sidebar for API key (overrides secrets for local testing)
 api_key = st.sidebar.text_input("OpenAI API Key:", type="password", help="Enter your key here for local testing. Use secrets on Streamlit Cloud.")
@@ -67,17 +68,18 @@ samples = get_samples()
 
 # HF Dataset Section
 st.subheader("Batch Evaluation with Hugging Face Dataset")
+st.warning("**Quota Tip**: Batch eval uses multiple OpenAI calls (embeddings + generations + RAGAS). Start with N=1 to avoid quota errors. Upgrade plan if needed: https://platform.openai.com/account/usage")
 col1, col2, col3 = st.columns(3)
 with col1:
     dataset_name = st.text_input("Dataset Name (e.g., squad):", value="squad")
 with col2:
     split = st.text_input("Split (e.g., validation):", value="validation")
 with col3:
-    num_samples = st.slider("Number of Samples to Evaluate:", min_value=1, max_value=20, value=5)
+    num_samples = st.slider("Number of Samples to Evaluate:", min_value=1, max_value=5, value=1)  # Reduced max/default
 
 if st.button("Load & Evaluate HF Dataset"):
     try:
-        with st.spinner("Loading dataset and evaluating... This may take 2-5 minutes."):
+        with st.spinner("Loading dataset and evaluating... This may take 1-3 minutes for small N."):
             # Load HF dataset
             hf_dataset = load_dataset(dataset_name, split=split)
             # Subsample
@@ -95,7 +97,7 @@ if st.button("Load & Evaluate HF Dataset"):
             splits = splitter.split_documents(all_docs)
             embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
             vectorstore = Chroma.from_documents(splits, embeddings)
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 2})  # Reduced k to save calls
             llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
             qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever, return_source_documents=True)
             
@@ -117,7 +119,6 @@ if st.button("Load & Evaluate HF Dataset"):
             has_gt = any(gt for gt in ground_truths)
             if has_gt:
                 data["ground_truths"] = [gt for gt in ground_truths if gt]
-                # Pad or filter if needed, but assume uniform
             
             dataset = Dataset.from_dict(data)
             metrics = [faithfulness, answer_relevancy, context_precision]
@@ -140,6 +141,12 @@ if st.button("Load & Evaluate HF Dataset"):
             st.write(f"**Retrieved Contexts:** {'---'.join(retrieved_contexts[0])}")
             if ground_truths[0]:
                 st.write(f"**Ground Truth:** {ground_truths[0][0]}")
+    except openai.APIError as e:
+        if e.code == "insufficient_quota" or "quota" in str(e).lower():
+            st.error(f"OpenAI Quota Exceeded: {str(e).split('message')[0] if 'message' in str(e) else str(e)} Check billing: https://platform.openai.com/account/usage")
+            st.info("Workaround: Use Single Evaluation mode or reduce N to 1. Upgrade to paid plan for more usage.")
+        else:
+            st.error(f"OpenAI API Error: {str(e)}")
     except Exception as e:
         st.error(f"Failed to load/evaluate: {str(e)}")
         st.info("Tips: Use small datasets like 'squad' (validation split). Ensure dataset has 'question', 'context', 'answers' keys.")
@@ -166,11 +173,17 @@ documents_input = st.text_area(
     key="docs_input"
 )
 if st.button("Build Index"):
-    if documents_input.strip():
-        st.session_state.vectorstore = build_index(documents_input)
-        st.success("Index built!")
-    else:
-        st.error("Provide documents.")
+    try:
+        if documents_input.strip():
+            st.session_state.vectorstore = build_index(documents_input)
+            st.success("Index built!")
+        else:
+            st.error("Provide documents.")
+    except openai.APIError as e:
+        if e.code == "insufficient_quota" or "quota" in str(e).lower():
+            st.error(f"OpenAI Quota Exceeded during indexing: {str(e).split('message')[0] if 'message' in str(e) else str(e)} Check billing: https://platform.openai.com/account/usage")
+        else:
+            st.error(f"OpenAI API Error during indexing: {str(e)}")
 
 @st.cache_resource
 def build_index(_docs_input):
@@ -196,14 +209,20 @@ st.session_state.question = question
 col1, col2 = st.columns(2)
 with col1:
     if st.session_state.vectorstore and st.button("Generate Answer with RAG"):
-        with st.spinner("Generating..."):
-            retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 3})
-            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-            qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever, return_source_documents=True)
-            result = qa_chain({"query": question})
-            st.session_state.answer = result["result"]
-            st.session_state.contexts = "---".join([doc.page_content for doc in result["source_documents"]])
-        st.rerun()
+        try:
+            with st.spinner("Generating..."):
+                retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 2})  # Reduced k
+                llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+                qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever, return_source_documents=True)
+                result = qa_chain({"query": question})
+                st.session_state.answer = result["result"]
+                st.session_state.contexts = "---".join([doc.page_content for doc in result["source_documents"]])
+            st.rerun()
+        except openai.APIError as e:
+            if e.code == "insufficient_quota" or "quota" in str(e).lower():
+                st.error(f"OpenAI Quota Exceeded during generation: {str(e).split('message')[0] if 'message' in str(e) else str(e)} Check billing: https://platform.openai.com/account/usage")
+            else:
+                st.error(f"OpenAI API Error during generation: {str(e)}")
 
 with col2:
     manual_mode = st.checkbox("Manual Mode", value=not st.session_state.vectorstore)
@@ -225,16 +244,16 @@ if st.button("Evaluate Single"):
     if not question or not generated_answer or not contexts_input:
         st.error("Fill required fields.")
     else:
-        contexts = [ctx.strip() for ctx in contexts_input.split("---") if ctx.strip()]
-        data = {"question": [question], "answer": [generated_answer], "contexts": [contexts]}
-        has_gt = bool(ground_truth.strip())
-        if has_gt:
-            data["ground_truths"] = [[ground_truth.strip()]]
-        dataset = Dataset.from_dict(data)
-        metrics = [faithfulness, answer_relevancy, context_precision]
-        if has_gt:
-            metrics.append(context_recall)
         try:
+            contexts = [ctx.strip() for ctx in contexts_input.split("---") if ctx.strip()]
+            data = {"question": [question], "answer": [generated_answer], "contexts": [contexts]}
+            has_gt = bool(ground_truth.strip())
+            if has_gt:
+                data["ground_truths"] = [[ground_truth.strip()]]
+            dataset = Dataset.from_dict(data)
+            metrics = [faithfulness, answer_relevancy, context_precision]
+            if has_gt:
+                metrics.append(context_recall)
             with st.spinner("Evaluating..."):
                 result = evaluate(dataset, metrics=metrics)
             st.success("Complete!")
@@ -243,15 +262,20 @@ if st.button("Evaluate Single"):
             for i, (metric, score) in enumerate(result.items()):
                 with cols[i]:
                     st.metric(metric.replace("_", " ").title(), f"{score:.4f}")
+        except openai.APIError as e:
+            if e.code == "insufficient_quota" or "quota" in str(e).lower():
+                st.error(f"OpenAI Quota Exceeded during evaluation: {str(e).split('message')[0] if 'message' in str(e) else str(e)} Check billing: https://platform.openai.com/account/usage")
+            else:
+                st.error(f"OpenAI API Error during evaluation: {str(e)}")
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
 st.markdown("---")
 st.markdown("""
 ### Notes (Dec 23, 2025 Update):
-- **Fix**: Updated CharacterTextSplitter import to `langchain_text_splitters` (separate package since LangChain 0.2+). Added dep.
-- **Compat**: All verified—no deprecations. RAGAS 0.3.9 stable; LangChain 0.3+ with text-splitters 0.3.0.
-- **HF Batch**: Improved GT handling for varying answers.
-- **Single**: As before.
-- **Tips**: Python 3.12+. Test with SQuAD for batch.
+- **Quota Handling**: Added specific catch for insufficient_quota (429-like). Reduced batch max to 5, default 1; k=2 for retrieval. Warnings & links to billing.
+- **Compat**: As before; all imports stable.
+- **HF Batch**: Improved error handling; try N=1 for testing.
+- **Single**: Safer with try-excepts around API ops.
+- **Tips**: For free tier limits, stick to manual/single. Paid plans unlock more.
 """)
